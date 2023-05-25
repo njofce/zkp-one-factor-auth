@@ -20,7 +20,8 @@ pub mod shared;
 #[derive(Debug, Default)]
 struct Shared {
     _users: Mutex<HashMap<String, UserData>>,
-    _sessions: Mutex<HashMap<String, UserSessionData>>
+    _challenges: Mutex<HashMap<String, UserChallengeData>>,
+    _sessions: Mutex<HashMap<String, String>>
 }
 
 #[derive(Clone, Debug, Default)]
@@ -30,7 +31,7 @@ pub struct UserData {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct UserSessionData {
+pub struct UserChallengeData {
     r1: String,
     r2: String,
     challenge: String,
@@ -49,7 +50,8 @@ impl Db {
         Self {
             shared: Arc::new(Shared {
                 _users: Mutex::new(HashMap::new()),
-                _sessions: Mutex::new(HashMap::new())
+                _challenges: Mutex::new(HashMap::new()),
+                _sessions: Mutex::new(HashMap::new()),
             })
         }
     }
@@ -72,7 +74,21 @@ impl Db {
         users.insert(email, UserData { y1: y1, y2: y2 });
     }
 
-    pub fn get_session(&self, auth_id: String) -> Option<(String, UserSessionData)> {
+    pub fn get_challenge_data(&self, auth_id: String) -> Option<(String, UserChallengeData)> {
+        let challenges = self.shared._challenges.lock().unwrap();
+        match challenges.get(&auth_id) {
+            Some(challenge) => Some((auth_id, challenge.clone())),
+            None => None,
+        }
+    }
+
+    pub fn add_challenge_data(&self, auth_id: String, r1: String, r2: String, challenge: String) {
+        let mut challenges = self.shared._challenges.lock().unwrap();
+
+        challenges.insert(auth_id, UserChallengeData { r1: r1, r2: r2, challenge: challenge });
+    }
+
+    pub fn get_session_data(&self, auth_id: String) -> Option<(String, String)> {
         let sessions = self.shared._sessions.lock().unwrap();
         match sessions.get(&auth_id) {
             Some(session) => Some((auth_id, session.clone())),
@@ -80,10 +96,9 @@ impl Db {
         }
     }
 
-    pub fn add_session(&self, auth_id: String, r1: String, r2: String, challenge: String) {
+    pub fn add_session(&self, auth_id: String, session_id: String) {
         let mut sessions = self.shared._sessions.lock().unwrap();
-
-        sessions.insert(auth_id, UserSessionData { r1: r1, r2: r2, challenge: challenge });
+        sessions.insert(auth_id, session_id);
     }
 
 }
@@ -121,7 +136,7 @@ impl Auth for AuthService {
         if self.user_db.contains_user(&user) {
             auth_id.push_str(&user);
 
-            self.user_db.add_session(user, r.r1, r.r2, challenge.to_string())
+            self.user_db.add_challenge_data(user, r.r1, r.r2, challenge.to_string())
         } else {
             auth_id.push_str("NotFound");
         }
@@ -139,7 +154,7 @@ impl Auth for AuthService {
         let auth_id = r.auth_id;
         let s = r.s;
 
-        let session = self.user_db.get_session(auth_id.clone()).unwrap();
+        let session = self.user_db.get_challenge_data(auth_id.clone()).unwrap();
         let user = self.user_db.get_user(auth_id.clone()).unwrap();
         
         let y1: BigInt = BigInt::from_str(&user.1.clone().y1).unwrap();
@@ -157,8 +172,10 @@ impl Auth for AuthService {
             let rnd_session_id = generate_random_in_range(&BigInt::from_i32(2).unwrap(), &BigInt::from_str(&Q).unwrap().sub(1)); 
             session_id.push_str(&rnd_session_id.to_string())
         } else {
-            session_id.push_str("BAD CREDENTIALS")
+            session_id.push_str("BAD CREDENTIALS");
         }
+
+        self.user_db.add_session(auth_id, session_id.clone());
 
         return Ok(Response::new(zkp_auth::AuthenticationAnswerResponse { 
             session_id: session_id,

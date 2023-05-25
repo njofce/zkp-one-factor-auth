@@ -101,6 +101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let session_id = &verify_auth_res.get_ref().session_id;
 
+                    if session_id != "BAD CREDENTIALS" {
+                        println!("Successfully logged in");
+                    }
                     println!("Session id {}", &session_id);
                 }
                 _ => {
